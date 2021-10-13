@@ -106,3 +106,10 @@ class EmptyContainer(Task):
 
     def _repeat(self):
         return len(self.bin_objects_not_done) > 0
+
+    def is_static_workspace(self) -> bool:
+        """Specify if the task should'nt be randomly placed in the workspace.
+
+        :return: True if the task pose should not be sampled.
+        """
+        return True
