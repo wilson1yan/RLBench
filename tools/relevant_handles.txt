@@ -1,0 +1,7 @@
+blocks: 102, 106, 111, 112, 114, 115, 116, 117
+ground: 10
+robot parts: 31, 34, 35, 39, 40, 41, 44, 45, 46
+workspace: 48
+rest of table: 52
+wall: 55
+

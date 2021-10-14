@@ -93,3 +93,10 @@ class StackBlocks(Task):
     def _repeat(self):
         self.blocks_stacked += 1
         return self.blocks_stacked < self.blocks_to_stack
+
+    def is_static_workspace(self) -> bool:
+        """Specify if the task should'nt be randomly placed in the workspace.
+
+        :return: True if the task pose should not be sampled.
+        """
+        return True

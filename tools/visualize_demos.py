@@ -14,7 +14,8 @@ live_demos = True
 DATASET = ''
 
 obs_config = ObservationConfig()
-obs_config.set_all(True)
+obs_config.set_all(False)
+obs_config.front_camera.set_all(True)
 
 action_mode = ActionMode(ArmActionMode.ABS_JOINT_VELOCITY)
 env = Environment(
