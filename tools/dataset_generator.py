@@ -138,24 +138,24 @@ def save_demo(demo, example_path):
         front_mask.save(os.path.join(front_mask_path, IMAGE_FORMAT % i))
 
         # We save the images separately, so set these to None for pickling.
-#        obs.left_shoulder_rgb = None
-#        obs.left_shoulder_depth = None
-#        obs.left_shoulder_point_cloud = None
-#        obs.left_shoulder_mask = None
-#        obs.right_shoulder_rgb = None
-#        obs.right_shoulder_depth = None
-#        obs.right_shoulder_point_cloud = None
-#        obs.right_shoulder_mask = None
-#        obs.overhead_rgb = None
-#        obs.overhead_depth = None
-#        obs.overhead_point_cloud = None
-#        obs.overhead_mask = None
-#        obs.wrist_rgb = None
-#        obs.wrist_depth = None
-#        obs.wrist_point_cloud = None
-#        obs.wrist_mask = None
+        obs.left_shoulder_rgb = None
+        obs.left_shoulder_depth = None
+        obs.left_shoulder_point_cloud = None
+        obs.left_shoulder_mask = None
+        obs.right_shoulder_rgb = None
+        obs.right_shoulder_depth = None
+        obs.right_shoulder_point_cloud = None
+        obs.right_shoulder_mask = None
+        obs.overhead_rgb = None
+        obs.overhead_depth = None
+        obs.overhead_point_cloud = None
+        obs.overhead_mask = None
+        obs.wrist_rgb = None
+        obs.wrist_depth = None
+        obs.wrist_point_cloud = None
+        obs.wrist_mask = None
         obs.front_rgb = None
-#        obs.front_depth = None
+        obs.front_depth = None
         obs.front_point_cloud = None
         obs.front_mask = None
 
@@ -176,6 +176,7 @@ def run(i, lock, task_index, variation_count, results, file_lock, tasks):
 
     obs_config = ObservationConfig()
     obs_config.set_all(False)
+    obs_config.set_all_low_dim(True)
     obs_config.front_camera.set_all(True)
 #    obs_config.right_shoulder_camera.image_size = img_size
 #    obs_config.left_shoulder_camera.image_size = img_size
