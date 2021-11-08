@@ -1,3 +1,5 @@
+import numpy as np
+from functools import partial
 from typing import List
 from rlbench.backend.task import Task
 from rlbench.backend.conditions import JointCondition
@@ -12,6 +14,7 @@ class LampOn(Task):
         self.bulb_glass_visual.set_color([0, 0, 0])
         self.joint = Joint('target_button_joint')
         self.condition = JointCondition(self.joint, 0.003)
+        # self.register_waypoint_ability_start(1, self._add_waypoint_noise)
 
     def init_episode(self, index: int) -> List[str]:
         self.bulb_glass_visual.set_color([0, 0, 0])
@@ -29,3 +32,15 @@ class LampOn(Task):
     def step(self) -> None:
         if self.condition.condition_met() == (True, True):
             self.bulb_glass_visual.set_color([1, 1, 1])
+        
+    # def base_rotation_bounds(self):
+    #     return (0.0, 0.0, -np.pi), (0.0, 0.0, 0.0)
+
+    # def _add_waypoint_noise(self, waypoint):
+    #     waypoint = waypoint._waypoint
+    #     print(waypoint.get_position())
+    #     if np.random.rand() < 0.25:
+    #         eps = np.zeros(3)
+    #     else:
+    #         eps = np.random.randn(3) * 0.025
+    #     waypoint.set_position(waypoint.get_position() + eps)
