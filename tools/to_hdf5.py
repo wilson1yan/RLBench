@@ -7,40 +7,24 @@ from PIL import Image
 import numpy as np
 import pickle
 from pyquaternion import Quaternion
+import multiprocessing as mp
 
 def int_from_fname(fname):
     return int(osp.basename(fname).split('.')[0])
 
 
-parser = argparse.ArgumentParser()
-parser.add_argument('-d', '--data_file', type=str, required=True)
-parser.add_argument('-p', '--prop_train', type=float, default=0.9)
-parser.add_argument('-o', '--output_file', type=str, required=True)
-parser.add_argument('-s', '--skip', type=int, default=1)
-args = parser.parse_args()
-
-root = args.data_file
-episodes = glob.glob(osp.join(root, '**', 'episodes', 'episode*'), recursive=True)
-print(f'Found {len(episodes)} episodes')
-
-images, masks = [], []
-actions = []
-idxs = [0]
-for path in tqdm(episodes):
+def read(path):
     rgb_images = glob.glob(osp.join(path, 'front_rgb', '*.png'))
     rgb_images.sort(key=int_from_fname)
     rgb_images = [np.array(Image.open(p)) for p in rgb_images]
     rgb_images = np.stack(rgb_images, axis=0)
     rgb_images = rgb_images[::args.skip]
-    images.append(rgb_images)
-    idxs.append(idxs[-1] + len(rgb_images))
 
     mask_images = glob.glob(osp.join(path, 'front_mask', '*.png'))
     mask_images.sort(key=int_from_fname)
     mask_images = [np.array(Image.open(p))[:, :, 0] for p in mask_images]
     mask_images = np.stack(mask_images, axis=0)
     mask_images = mask_images[::args.skip]
-    masks.append(mask_images)
     
     low_dim_obs = pickle.load(open(osp.join(path, 'low_dim_obs.pkl'), 'rb'))
     acts = np.stack([
@@ -65,35 +49,62 @@ for path in tqdm(episodes):
         new_acts.append(np.concatenate((t_diff, q_diff, [g_diff])))
     new_acts.append(np.zeros_like(new_acts[-1]))
     acts = np.stack(new_acts, axis=0)
-    actions.append(acts)
-
     assert rgb_images.shape[0] == mask_images.shape[0] == acts.shape[0] 
 
-images = np.concatenate(images, axis=0)
-masks = np.concatenate(masks, axis=0).astype(np.int32)
-actions = np.concatenate(actions, axis=0).astype(np.float32)
-idxs = np.array(idxs[:-1], dtype=np.int64)
+    return rgb_images, mask_images, acts
 
-t = int(len(idxs) * args.prop_train)
-train_images, test_images = images[:idxs[t]], images[idxs[t]:]
-train_masks, test_masks = masks[:idxs[t]], masks[idxs[t]:]
-train_actions, test_actions = actions[:idxs[t]], actions[idxs[t]:]
-train_idxs, test_idxs = idxs[:t], idxs[t:]
-test_idxs -= test_idxs[0]
 
-f = h5py.File(args.output_file, 'a')
-f.create_dataset('train_data', data=train_images)
-f.create_dataset('train_action', data=train_actions)
-f.create_dataset('train_idx', data=train_idxs)
-f.create_dataset('train_mask', data=train_masks)
+def read_data(f, split, episodes):
+    episode_lens = [len(glob.glob(osp.join(path, 'front_rgb', '*.png')))
+                    for path in episodes]
+    image_size = Image.open(osp.join(episodes[0], 'front_rgb', '0.png')).width # assume width == height
+    n_frames = sum(episode_lens)
+    idx = np.cumsum([0] + episode_lens[:-1])
+    f.create_dataset(f'{split}_data', (n_frames, image_size, image_size, 3), dtype=np.uint8)
+    f.create_dataset(f'{split}_mask', (n_frames, image_size, image_size), dtype=np.int32)
+    f.create_dataset(f'{split}_action', (n_frames, action_dim), dtype=np.float32)
+    f.create_dataset(f'{split}_idx', data=idx)
 
-f.create_dataset('test_data', data=test_images)
-f.create_dataset('test_action', data=test_actions)
-f.create_dataset('test_idx', data=test_idxs)
-f.create_dataset('test_mask', data=test_masks)
-f.close()
+    pool = mp.Pool(args.workers)
+    pbar = tqdm(total=len(episodes))
+    for i in range(0, len(episodes), args.load_chunk_size):
+        start_ep = i
+        end_ep = min(len(episodes), i + args.load_chunk_size)
+        out = pool.map(read, episodes[start_ep:end_ep])
+        out = list(zip(*out))
+        rgb_images, mask_images, acts = [np.concatenate(o) for o in out]
 
-print('Saved data to:', args.output_file)
+        start_idx = idx[start_ep]
+        end_idx = idx[end_ep] if end_ep < len(episodes) else n_frames
+        f[f'{split}_data'][start_idx:end_idx] = rgb_images
+        f[f'{split}_mask'][start_idx:end_idx] = mask_images
+        f[f'{split}_actio'][start_idx:end_idx] = acts
+        pbar.update(end_ep - start_ep)
+
+
+parser = argparse.ArgumentParser()
+parser.add_argument('-d', '--data_file', type=str, required=True)
+parser.add_argument('-p', '--prop_train', type=float, default=0.9)
+parser.add_argument('-o', '--output_file', type=str, required=True)
+parser.add_argument('-s', '--skip', type=int, default=1)
+parser.add_argument('-w', '--workers', type=int, default=32)
+parser.add_argument('-l', '--load_chunk_size', type=int, default=512)
+args = parser.parse_args()
+
+if __name__ == '__main__':
+    root = args.data_file
+    episodes = glob.glob(osp.join(root, '**', 'episodes', 'episode*'), recursive=True)
+    print(f'Found {len(episodes)} episodes')
+    t = int(len(episodes) * args.prop_train)
+    train_episodes, test_episodes = episodes[:t], episodes[t:]
+    action_dim = 8 # 3 for translation, 4 for gripper rotation, 1 for gripper open / close
+
+    f = h5py.File(args.output_file, 'a')
+    read_data(f, 'train', train_episodes)
+    read_data(f, 'test', test_episodes)
+    f.close()
+
+    print('Saved data to:', args.output_file)
 
 
 
