@@ -78,7 +78,7 @@ def read_data(f, split, episodes):
         end_idx = idx[end_ep] if end_ep < len(episodes) else n_frames
         f[f'{split}_data'][start_idx:end_idx] = rgb_images
         f[f'{split}_mask'][start_idx:end_idx] = mask_images
-        f[f'{split}_actio'][start_idx:end_idx] = acts
+        f[f'{split}_action'][start_idx:end_idx] = acts
         pbar.update(end_ep - start_ep)
 
 
@@ -87,7 +87,7 @@ parser.add_argument('-d', '--data_file', type=str, required=True)
 parser.add_argument('-p', '--prop_train', type=float, default=0.9)
 parser.add_argument('-o', '--output_file', type=str, required=True)
 parser.add_argument('-s', '--skip', type=int, default=1)
-parser.add_argument('-w', '--workers', type=int, default=32)
+parser.add_argument('-w', '--workers', type=int, default=64)
 parser.add_argument('-l', '--load_chunk_size', type=int, default=512)
 args = parser.parse_args()
 

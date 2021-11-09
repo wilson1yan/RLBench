@@ -119,3 +119,4 @@ dmypy.json
 index.html
 *.png
 data/
+*.hdf5
