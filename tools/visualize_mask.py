@@ -5,7 +5,7 @@ import os.path as osp
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 
-root = osp.join('data', 'stack_blocks', 'variation0', 'episodes', 'episode0')
+root = osp.join('data', 'lamp_on', 'variation0', 'episodes', 'episode0')
 rgb_images = glob.glob(osp.join(root, 'front_rgb', '*.png'))
 rgb_images.sort()
 mask_images = glob.glob(osp.join(root, 'front_mask', '*.png'))
