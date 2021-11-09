@@ -38,9 +38,6 @@ class LampOn(Task):
 
     def _add_waypoint_noise(self, waypoint):
         waypoint = waypoint._waypoint
-        if np.random.rand() < 0.25:
-            eps = np.zeros(3)
-        else:
-            eps = np.random.randn(3) * 0.01
-            eps = np.clip(eps, -0.01, 0.01)
+        eps = np.random.randn(3) * 0.01
+        eps = np.clip(eps, -0.02, 0.02)
         waypoint.set_position(waypoint.get_position() + eps)

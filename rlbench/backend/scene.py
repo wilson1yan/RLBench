@@ -426,9 +426,9 @@ class Scene(object):
                     break
 
         success, term = self._active_task.success()
-        if not success:
-            raise DemoError('Demo was completed, but was not successful.',
-                            self._active_task)
+        # if not success:
+        #     raise DemoError('Demo was completed, but was not successful.',
+        #                     self._active_task)
         return Demo(demo)
 
     def get_observation_config(self) -> ObservationConfig:
