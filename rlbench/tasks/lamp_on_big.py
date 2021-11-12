@@ -6,7 +6,7 @@ from rlbench.backend.conditions import JointCondition
 from pyrep.objects.shape import Shape
 from pyrep.objects.joint import Joint
 
-COUNT_SUCCESS = True
+COUNT_SUCCESS = False
 
 class LampOnBig(Task):
 
