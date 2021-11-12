@@ -23,8 +23,7 @@ FLAGS = flags.FLAGS
 flags.DEFINE_string('save_path',
                     '/tmp/rlbench_data/',
                     'Where to save the demos.')
-flags.DEFINE_list('tasks', [],
-                  'The tasks to collect. If empty, all tasks are collected.')
+flags.DEFINE_list('task', None, 'The task to collect')
 flags.DEFINE_list('image_size', [128, 128],
                   'The size of the images tp save.')
 flags.DEFINE_enum('renderer',  'opengl3', ['opengl', 'opengl3'],
@@ -32,8 +31,8 @@ flags.DEFINE_enum('renderer',  'opengl3', ['opengl', 'opengl3'],
                   'but is faster.')
 flags.DEFINE_integer('processes', 1,
                      'The number of parallel processes during collection.')
-flags.DEFINE_integer('episodes_per_task', 10,
-                     'The number of episodes to collect per task.')
+flags.DEFINE_integer('episodes', 10,
+                     'The number of episodes')
 flags.DEFINE_integer('variations', -1,
                      'Number of variations to collect per task. -1 for all.')
 
@@ -41,6 +40,42 @@ flags.DEFINE_integer('variations', -1,
 def check_and_make(dir):
     if not os.path.exists(dir):
         os.makedirs(dir)
+
+        
+def compute_chunk(worker_id, n_workers, episodes, num_variations):
+    eps_per_variation = [episodes // num_variations + (episodes % num_variations < i)
+                         for i in range(num_variations)]
+    assert sum(eps_per_variation) == episodes and len(eps_per_variation) == num_variations
+
+    eps_per_worker = [episodes // n_workers + (episodes % n_workers < i)
+                      for i in range(n_workers)]
+    assert sum(eps_per_worker) == episodes and len(eps_per_worker) == n_workers
+    
+    chunks = [[] for _ in range(n_workers)]
+    for i in range(n_workers):
+        leftover_worker = eps_per_worker[i]
+        for j in range(num_variations):
+            leftover_var = eps_per_variation[j]
+            if leftover_var <= 0:
+                continue
+
+            if leftover_worker <= leftover_var:
+                chunks[i].append((j, leftover_worker))
+                leftover_var -= leftover_worker
+                eps_per_variation[j] = leftover_var
+                break
+            else:
+                chunks[i].append(j, leftover_var)
+                leftover_worker -= leftover_var
+                eps_per_variation[j] = 0
+    
+    assert all([sum(c) == w for c, w in zip(chunks, eps_per_worker)])
+    assert sum([c[1] for c in sum(chunks, [])]) == episodes
+
+    start_ids = np.cumsum([0] + eps_per_worker[:-1])
+
+    return chunks[worker_id], start_ids[worker_id]
+
 
 
 def save_demo(demo, example_path):
@@ -164,45 +199,24 @@ def save_demo(demo, example_path):
         pickle.dump(demo, f)
 
 
-def run(i, lock, task_index, variation_count, results, file_lock, tasks):
+def run(worker_id, n_workers, episodes, task):
     """Each thread will choose one task and variation, and then gather
     all the episodes_per_task for that variation."""
 
     # Initialise each thread with random seed
     np.random.seed(None)
-    num_tasks = len(tasks)
-
     img_size = list(map(int, FLAGS.image_size))
 
     obs_config = ObservationConfig()
     obs_config.set_all(False)
     obs_config.set_all_low_dim(True)
     obs_config.front_camera.set_all(True)
-#    obs_config.right_shoulder_camera.image_size = img_size
-#    obs_config.left_shoulder_camera.image_size = img_size
-#    obs_config.overhead_camera.image_size = img_size
-#    obs_config.wrist_camera.image_size = img_size
     obs_config.front_camera.image_size = img_size
 
-    # Store depth as 0 - 1
-#    obs_config.right_shoulder_camera.depth_in_meters = False
-#    obs_config.left_shoulder_camera.depth_in_meters = False
-#    obs_config.overhead_camera.depth_in_meters = False
-#    obs_config.wrist_camera.depth_in_meters = False
-#    obs_config.front_camera.depth_in_meters = False
-
     # We want to save the masks as rgb encodings.
-#    obs_config.left_shoulder_camera.masks_as_one_channel = False
-#    obs_config.right_shoulder_camera.masks_as_one_channel = False
-#    obs_config.overhead_camera.masks_as_one_channel = False
-#    obs_config.wrist_camera.masks_as_one_channel = False
     obs_config.front_camera.masks_as_one_channel = False
 
     if FLAGS.renderer == 'opengl':
-#        obs_config.right_shoulder_camera.render_mode = RenderMode.OPENGL
-#        obs_config.left_shoulder_camera.render_mode = RenderMode.OPENGL
-#        obs_config.overhead_camera.render_mode = RenderMode.OPENGL
-#        obs_config.wrist_camera.render_mode = RenderMode.OPENGL
         obs_config.front_camera.render_mode = RenderMode.OPENGL
 
     rlbench_env = Environment(
@@ -211,57 +225,26 @@ def run(i, lock, task_index, variation_count, results, file_lock, tasks):
         headless=True)
     rlbench_env.launch()
 
-    task_env = None
+    task_env = rlbench_env.get_task(task)
+    if FLAGS.variations >= 0:
+        num_variations = min(FLAGS.variations, task_env.variation_count())
+    else:
+        num_variations = task_env.variation_count()
+    chunks, ep_id = compute_chunk(worker_id, n_workers, episodes, num_variations)
 
-    tasks_with_problems = results[i] = ''
-
-    while True:
-        # Figure out what task/variation this thread is going to do
-        with lock:
-
-            if task_index.value >= num_tasks:
-                print('Process', i, 'finished')
-                break
-
-            my_variation_count = variation_count.value
-            t = tasks[task_index.value]
-            task_env = rlbench_env.get_task(t)
-            var_target = task_env.variation_count()
-            if FLAGS.variations >= 0:
-                var_target = np.minimum(FLAGS.variations, var_target)
-            if my_variation_count >= var_target:
-                # If we have reached the required number of variations for this
-                # task, then move on to the next task.
-                variation_count.value = my_variation_count = 0
-                task_index.value += 1
-
-            variation_count.value += 1
-            if task_index.value >= num_tasks:
-                print('Process', i, 'finished')
-                break
-            t = tasks[task_index.value]
-
-        task_env = rlbench_env.get_task(t)
-        task_env.set_variation(my_variation_count)
+    for var_id, n_eps in chunks:
+        task_env.set_variation(var_id)
         obs, descriptions = task_env.reset()
 
         variation_path = os.path.join(
             FLAGS.save_path, task_env.get_name(),
-            VARIATIONS_FOLDER % my_variation_count)
-
-        check_and_make(variation_path)
-
-        with open(os.path.join(
-                variation_path, VARIATION_DESCRIPTIONS), 'wb') as f:
-            pickle.dump(descriptions, f)
-
+            VARIATIONS_FOLDER % var_id)
         episodes_path = os.path.join(variation_path, EPISODES_FOLDER)
-        check_and_make(episodes_path)
 
         abort_variation = False
-        for ex_idx in range(FLAGS.episodes_per_task):
-            print('Process', i, '// Task:', task_env.get_name(),
-                  '// Variation:', my_variation_count, '// Demo:', ex_idx)
+        for ex_idx in range(ep_id, ep_id + n_eps):
+            print('Process', worker_id, '// Task:', task_env.get_name(),
+                  '// Variation:', var_id, '// Demo:', ex_idx)
             attempts = 10
             while attempts > 0:
                 try:
@@ -276,21 +259,18 @@ def run(i, lock, task_index, variation_count, results, file_lock, tasks):
                     problem = (
                         'Process %d failed collecting task %s (variation: %d, '
                         'example: %d). Skipping this task/variation.\n%s\n' % (
-                            i, task_env.get_name(), my_variation_count, ex_idx,
+                            worker_id, task_env.get_name(), var_id, ex_idx,
                             str(e))
                     )
                     print(problem)
-                    tasks_with_problems += problem
                     abort_variation = True
                     break
                 episode_path = os.path.join(episodes_path, EPISODE_FOLDER % ex_idx)
-                with file_lock:
-                    save_demo(demo, episode_path)
+                save_demo(demo, episode_path)
                 break
             if abort_variation:
                 break
 
-    results[i] = tasks_with_problems
     rlbench_env.shutdown()
 
 
@@ -299,36 +279,40 @@ def main(argv):
     task_files = [t.replace('.py', '') for t in os.listdir(task.TASKS_PATH)
                   if t != '__init__.py' and t.endswith('.py')]
 
-    if len(FLAGS.tasks) > 0:
-        for t in FLAGS.tasks:
-            if t not in task_files:
-                raise ValueError('Task %s not recognised!.' % t)
-        task_files = FLAGS.tasks
+    if FLAGS.task not in task_files:
+        raise ValueError('Task %s not recognised!.' % t)
+    task_file = FLAGS.task
 
-    tasks = [task_file_to_task_class(t) for t in task_files]
-
-    manager = Manager()
-
-    result_dict = manager.dict()
-    file_lock = manager.Lock()
-
-    task_index = manager.Value('i', 0)
-    variation_count = manager.Value('i', 0)
-    lock = manager.Lock()
+    task = task_file_to_task_class(task_file)
 
     check_and_make(FLAGS.save_path)
 
+    rlbench_env = Environment(
+        headless=True)
+    rlbench_env.launch()
+    task_env = rlbench_env.get_task(task)
+    if FLAGS.variations >= 0:
+        num_variations = min(FLAGS.variations, task_env.variation_count())
+    else:
+        num_variations = task_env.variation_count()
+        
+    for var_id in range(num_variations):
+        variation_path = os.path.join(
+            FLAGS.save_path, task_env.get_name(),
+            VARIATIONS_FOLDER % var_id)
+        check_and_make(variation_path) 
+
+        episodes_path = os.path.join(variation_path, EPISODES_FOLDER)
+        check_and_make(episodes_path)
+
     processes = [Process(
         target=run, args=(
-            i, lock, task_index, variation_count, result_dict, file_lock,
-            tasks))
+            i, FLAGS.processes, FLAGS.episodes, task))
         for i in range(FLAGS.processes)]
     [t.start() for t in processes]
     [t.join() for t in processes]
 
     print('Data collection done!')
-    for i in range(FLAGS.processes):
-        print(result_dict[i])
 
 
 if __name__ == '__main__':
