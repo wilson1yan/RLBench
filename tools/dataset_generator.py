@@ -6,8 +6,9 @@ from rlbench import ObservationConfig
 from rlbench.action_modes import ActionMode
 from rlbench.backend.utils import task_file_to_task_class
 from rlbench.environment import Environment
-import rlbench.backend.task as task
+import rlbench.backend.task as rltask
 
+from tqdm import tqdm
 import os
 import pickle
 from PIL import Image
@@ -43,11 +44,11 @@ def check_and_make(dir):
 
         
 def compute_chunk(worker_id, n_workers, episodes, num_variations):
-    eps_per_variation = [episodes // num_variations + (episodes % num_variations < i)
+    eps_per_variation = [episodes // num_variations + (i < episodes % num_variations)
                          for i in range(num_variations)]
     assert sum(eps_per_variation) == episodes and len(eps_per_variation) == num_variations
 
-    eps_per_worker = [episodes // n_workers + (episodes % n_workers < i)
+    eps_per_worker = [episodes // n_workers + (i < episodes % n_workers)
                       for i in range(n_workers)]
     assert sum(eps_per_worker) == episodes and len(eps_per_worker) == n_workers
     
@@ -69,7 +70,7 @@ def compute_chunk(worker_id, n_workers, episodes, num_variations):
                 leftover_worker -= leftover_var
                 eps_per_variation[j] = 0
     
-    assert all([sum(c) == w for c, w in zip(chunks, eps_per_worker)])
+    assert all([sum([ci[1] for ci in c]) == w for c, w in zip(chunks, eps_per_worker)])
     assert sum([c[1] for c in sum(chunks, [])]) == episodes
 
     start_ids = np.cumsum([0] + eps_per_worker[:-1])
@@ -202,7 +203,6 @@ def save_demo(demo, example_path):
 def run(worker_id, n_workers, episodes, task):
     """Each thread will choose one task and variation, and then gather
     all the episodes_per_task for that variation."""
-
     # Initialise each thread with random seed
     np.random.seed(None)
     img_size = list(map(int, FLAGS.image_size))
@@ -231,7 +231,10 @@ def run(worker_id, n_workers, episodes, task):
     else:
         num_variations = task_env.variation_count()
     chunks, ep_id = compute_chunk(worker_id, n_workers, episodes, num_variations)
+    print('Process', worker_id, 'chunks:', chunks)
 
+    if worker_id == 0:
+        pbar = tqdm(total=sum([c[1] for c in chunks]))
     for var_id, n_eps in chunks:
         task_env.set_variation(var_id)
         obs, descriptions = task_env.reset()
@@ -243,8 +246,8 @@ def run(worker_id, n_workers, episodes, task):
 
         abort_variation = False
         for ex_idx in range(ep_id, ep_id + n_eps):
-            print('Process', worker_id, '// Task:', task_env.get_name(),
-                  '// Variation:', var_id, '// Demo:', ex_idx)
+            #print('Process', worker_id, '// Task:', task_env.get_name(),
+            #      '// Variation:', var_id, '// Demo:', ex_idx)
             attempts = 10
             while attempts > 0:
                 try:
@@ -267,38 +270,44 @@ def run(worker_id, n_workers, episodes, task):
                     break
                 episode_path = os.path.join(episodes_path, EPISODE_FOLDER % ex_idx)
                 save_demo(demo, episode_path)
+                if worker_id == 0:
+                    pbar.update(1)
                 break
             if abort_variation:
                 break
+    if worker_id == 0:
+        pbar.close()
 
     rlbench_env.shutdown()
 
 
 def main(argv):
 
-    task_files = [t.replace('.py', '') for t in os.listdir(task.TASKS_PATH)
+    task_files = [t.replace('.py', '') for t in os.listdir(rltask.TASKS_PATH)
                   if t != '__init__.py' and t.endswith('.py')]
 
-    if FLAGS.task not in task_files:
+    if FLAGS.task[0] not in task_files:
         raise ValueError('Task %s not recognised!.' % t)
-    task_file = FLAGS.task
+    task_file = FLAGS.task[0]
 
     task = task_file_to_task_class(task_file)
 
     check_and_make(FLAGS.save_path)
 
-    rlbench_env = Environment(
-        headless=True)
-    rlbench_env.launch()
-    task_env = rlbench_env.get_task(task)
-    if FLAGS.variations >= 0:
-        num_variations = min(FLAGS.variations, task_env.variation_count())
-    else:
-        num_variations = task_env.variation_count()
+    #rlbench_env = Environment(
+    #    action_mode=ActionMode(),
+    #    headless=True)
+    #rlbench_env.launch()
+    #task_env = rlbench_env.get_task(task)
+    #if FLAGS.variations >= 0:
+    #    num_variations = min(FLAGS.variations, task_env.variation_count())
+    #else:
+    #    num_variations = task_env.variation_count()
+    num_variations = 1
         
     for var_id in range(num_variations):
         variation_path = os.path.join(
-            FLAGS.save_path, task_env.get_name(),
+            FLAGS.save_path, 'lamp_on',#task_env.get_name(),
             VARIATIONS_FOLDER % var_id)
         check_and_make(variation_path) 
 
@@ -309,6 +318,7 @@ def main(argv):
         target=run, args=(
             i, FLAGS.processes, FLAGS.episodes, task))
         for i in range(FLAGS.processes)]
+    print('Starting processes')
     [t.start() for t in processes]
     [t.join() for t in processes]
 
