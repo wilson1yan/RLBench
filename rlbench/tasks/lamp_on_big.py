@@ -6,7 +6,7 @@ from rlbench.backend.conditions import JointCondition
 from pyrep.objects.shape import Shape
 from pyrep.objects.joint import Joint
 
-COUNT_SUCCESS = False
+COUNT_SUCCESS = True
 
 class LampOnBig(Task):
 
@@ -54,6 +54,6 @@ class LampOnBig(Task):
 
     def _add_waypoint_noise(self, waypoint):
         waypoint = waypoint._waypoint
-        eps = np.random.randn(3) * 0.01
-        eps = np.clip(eps, -0.02, 0.02)
+        eps = np.random.randn(3) * 0.04
+        eps = np.clip(eps, -0.04, 0.04)
         waypoint.set_position(waypoint.get_position() + eps)
